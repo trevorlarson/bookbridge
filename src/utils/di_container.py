@@ -17,6 +17,8 @@ from src.api.bookfusion_client import BookFusionClient
 from src.api.bookorbit_client import BookOrbitClient
 from src.api.cwa_client import CWAClient
 from src.api.cwa_sync_api import CWASyncApi
+from src.api.komga_client import KomgaClient
+from src.api.komga_sync_api import KomgaSyncApi
 from src.api.hardcover_client import HardcoverClient
 from src.api.llm_client import create_llm_client
 from src.api.kavita_client import KavitaClient, KavitaKoSyncClient
@@ -49,6 +51,7 @@ from src.sync_clients.bookorbit_sync_client import BookOrbitSyncClient
 from src.sync_clients.bookorbit_audio_sync_client import BookOrbitAudioSyncClient
 from src.sync_clients.abs_ebook_sync_client import ABSEbookSyncClient
 from src.sync_clients.cwa_sync_client import CWASyncClient
+from src.sync_clients.komga_sync_client import KomgaSyncClient
 from src.sync_clients.hardcover_sync_client import HardcoverSyncClient
 from src.sync_clients.storygraph_sync_client import StorygraphSyncClient
 from src.sync_manager import SyncManager
@@ -142,6 +145,20 @@ class Container(containers.DeclarativeContainer):
         ollama_client=ollama_client
     )
 
+    komga_client = providers.Singleton(
+        KomgaClient,
+        ebook_parser=ebook_parser,
+        data_dir=data_dir,
+        # Share the epub cache so a downloaded Komga source EPUB is resolvable by
+        # filename, exactly like every other provider's download.
+        books_dir=epub_cache_dir,
+    )
+
+    komga_sync_api = providers.Singleton(
+        KomgaSyncApi,
+        data_dir=data_dir,
+    )
+
     # Smil Extractor Provider
     smil_extractor = providers.Singleton(
         SmilExtractor
@@ -169,6 +186,7 @@ class Container(containers.DeclarativeContainer):
         epub_cache_dir=epub_cache_dir,
         bookorbit_client=bookorbit_client,
         kavita_client=kavita_client,
+        komga_client=komga_client,
     )
 
     koreader_device_sync_service = providers.Singleton(
@@ -277,6 +295,15 @@ class Container(containers.DeclarativeContainer):
         ebook_parser
     )
 
+    komga_sync_client = providers.Singleton(
+        KomgaSyncClient,
+        komga_sync_api,
+        komga_client,
+        ebook_parser,
+        user_id=None,
+        database_service=database_service,
+    )
+
     hardcover_sync_client = providers.Singleton(
         HardcoverSyncClient,
         hardcover_client,
@@ -338,6 +365,7 @@ class Container(containers.DeclarativeContainer):
         BookOrbit=bookorbit_sync_client,
         BookOrbitAudio=bookorbit_audio_sync_client,
         CWA=cwa_sync_client,
+        Komga=komga_sync_client,
         Hardcover=hardcover_sync_client,
         StoryGraph=storygraph_sync_client
     )
@@ -351,6 +379,7 @@ class Container(containers.DeclarativeContainer):
         booklore_client=booklore_client,
         bookorbit_client=bookorbit_client,
         kavita_client=kavita_client,
+        komga_client=komga_client,
         storyteller_client=storyteller_client,
         library_service=library_service,
         ebook_parser=ebook_parser,
@@ -451,6 +480,7 @@ class Container(containers.DeclarativeContainer):
         bookfusion_client=bookfusion_client,
         bookorbit_client=bookorbit_client,
         kavita_client=kavita_client,
+        komga_client=komga_client,
         hardcover_client=hardcover_client,
         storyteller_client=storyteller_client,
         transcriber=transcriber,

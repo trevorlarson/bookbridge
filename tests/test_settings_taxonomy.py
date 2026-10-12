@@ -23,6 +23,7 @@ CANONICAL_SERVICES = [
     "Kavita",
     "Readest",
     "Calibre-Web Automated",
+    "Komga",
     "Hardcover",
     "StoryGraph",
 ]

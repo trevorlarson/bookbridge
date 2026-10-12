@@ -66,15 +66,16 @@ _GENERATED_CACHE_FILENAME_RE = re.compile(r"^.+_(?:direct|cwa|abs_search)\.[A-Za
 def is_managed_cache_filename(filename: str) -> bool:
     """True when ``filename`` is one the bridge generates into the epub cache.
 
-    Covers provider downloads (``bookfusion_*``, ``storyteller_*``) and the
-    ABS-item acquisition names. Such a file lives in the cache, not the library,
-    so ``EbookParser.resolve_book_path`` checks the cache before walking the
-    library for it.
+    Covers provider downloads (``bookfusion_*``, ``storyteller_*``, ``komga_*``)
+    and the ABS-item acquisition names. Such a file lives in the cache, not the
+    library, so ``EbookParser.resolve_book_path`` checks the cache before walking
+    the library for it.
     """
     name = str(filename or "")
     return (
         name.startswith("bookfusion_")
         or name.startswith("storyteller_")
+        or name.startswith("komga_")
         or bool(_GENERATED_CACHE_FILENAME_RE.match(name))
     )
 

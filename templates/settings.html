@@ -1623,6 +1623,73 @@
                 </div>
             </div>
 
+            <!-- Komga (Optional) -->
+            <div class="settings-section" data-svc="komga">
+                {% set komga_configured = get_val('KOMGA_SERVER') != '' %}
+                {% set komga_enabled = get_bool('KOMGA_ENABLED') %}
+                <div class="section-header">
+                    <div class="svc-left">
+                        <span class="svc-chev">▶</span>
+                        <div class="svc-chip">KG</div>
+                        <div class="svc-title">
+                            <h3>Komga</h3>
+                            <div class="svc-desc">Kobo reading progress via a Komga library</div>
+                        </div>
+                    </div>
+                    <div class="header-tail">
+                        {% if komga_configured %}<span class="pill ok">Configured</span>
+                        {% else %}<span class="pill off">Not configured</span>{% endif %}
+                        <div class="toggle-switch-wrapper">
+                            <span class="toggle-label">Enable</span>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="toggle_komga" name="KOMGA_ENABLED"
+                                    onchange="toggleSection('komga_body', this.checked)" {% if komga_enabled %}checked{% endif
+                                    %}>
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <div id="komga_body" class="section-body {% if not komga_enabled %}collapsed{% endif %}">
+                    <div class="form-group full-width">
+                        <label>Server URL</label>
+                        <input type="text" name="KOMGA_SERVER" value="{{ get_val('KOMGA_SERVER') }}">
+                        <div class="help-text">URL of your Komga instance (e.g.
+                            <code>https://komga.example.com</code>). A reverse-proxy path prefix is kept as-is.</div>
+                    </div>
+                    <div class="form-group full-width">
+                        <div class="help-text">
+                            🔒 <strong>Per-user API key.</strong> Each reader's Komga API key is set per user in
+                            <a href="{{ url_for('settings') }}#users" style="color:#aab4f5;">Settings → Users → (user) → Integrations</a>
+                            (including your own). Use a dedicated key for BookBridge rather than the one on the device.
+                            The server URL and poll settings here are global.
+                        </div>
+                    </div>
+
+                    <!-- Reading Progress Sync -->
+                    <div class="full-width" style="margin: 10px 0; border-top: 1px solid rgba(255,255,255,0.1);"></div>
+                    <h4 class="full-width" style="font-size: 14px; color: #fff; margin-bottom: -10px;">Reading Progress Sync</h4>
+                    <div class="checkbox-wrapper full-width">
+                        <input type="checkbox" id="komga_sync_toggle" name="KOMGA_SYNC_ENABLED"
+                            {% if get_bool('KOMGA_SYNC_ENABLED') %}checked{% endif %}>
+                        <label for="komga_sync_toggle">Enable Sync</label>
+                        <div class="help-text">Read a reader's Komga position (native Kobo progress) and bridge it with
+                            Audiobookshelf through the alignment pipeline. Komga keeps serving your Kobo its books,
+                            covers and library sync &mdash; this does not change your device's Komga URL.</div>
+                    </div>
+                    <div class="checkbox-wrapper full-width">
+                        <input type="checkbox" id="komga_reverse_toggle" name="KOMGA_REVERSE_SYNC_ENABLED"
+                            {% if get_bool('KOMGA_REVERSE_SYNC_ENABLED') %}checked{% endif %}>
+                        <label for="komga_reverse_toggle">Write positions back to Komga</label>
+                        <div class="help-text"><strong>Off by default and still gated.</strong> Writing needs an exact
+                            bookmark resolved from the very KEPUB Komga serves your device, and that placement has not
+                            been verified against a physical Kobo yet. Leave this off until the device check in
+                            <code>docs/komga-development.md</code> has been completed; with it off, BookBridge reads
+                            Komga progress but never changes it.</div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Hardcover (Optional) -->
             <div class="settings-section" data-svc="hardcover">
                 {% set hardcover_configured = get_val('HARDCOVER_TOKEN') != '' %}
@@ -2545,6 +2612,36 @@
                                 <label class="toggle-switch">
                                     <input type="checkbox" name="CWA_SYNC_POLL_WAIT_FOR_SETTLE"
                                         {% if get_bool('CWA_SYNC_POLL_WAIT_FOR_SETTLE') %}checked{% endif %}>
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                            <div class="help-text">Hold the sync while the position keeps changing between polls (actively reading); run it once a poll shows no further movement.</div>
+                        </div>
+                        {% endif %}
+
+                        {% if get_bool('KOMGA_SYNC_ENABLED') %}
+                        <div class="form-group" style="align-items: center;">
+                            <label>Komga Poll Mode</label>
+                            <select name="KOMGA_SYNC_POLL_MODE" id="komga_sync_poll_mode"
+                                    onchange="togglePollSeconds('komga_sync_poll_seconds_row', this.value); togglePollSeconds('komga_sync_poll_settle_row', this.value)">
+                                <option value="global" {% if get_val('KOMGA_SYNC_POLL_MODE', 'global') == 'global' %}selected{% endif %}>Global</option>
+                                <option value="custom" {% if get_val('KOMGA_SYNC_POLL_MODE') == 'custom' %}selected{% endif %}>Custom</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="komga_sync_poll_seconds_row"
+                             {% if get_val('KOMGA_SYNC_POLL_MODE') != 'custom' %}style="opacity: 0.45; pointer-events: none;"{% endif %}>
+                            <label>Komga Poll Interval (seconds)</label>
+                            <input type="number" name="KOMGA_SYNC_POLL_SECONDS" min="10"
+                                   value="{{ get_val('KOMGA_SYNC_POLL_SECONDS', '300') }}">
+                            <div class="help-text">Recommended: 300s for Komga.</div>
+                        </div>
+                        <div class="form-group" id="komga_sync_poll_settle_row"
+                             {% if get_val('KOMGA_SYNC_POLL_MODE') != 'custom' %}style="opacity: 0.45; pointer-events: none;"{% endif %}>
+                            <label>Komga — Wait for Position to Settle</label>
+                            <div class="toggle-switch-wrapper">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" name="KOMGA_SYNC_POLL_WAIT_FOR_SETTLE"
+                                        {% if get_bool('KOMGA_SYNC_POLL_WAIT_FOR_SETTLE') %}checked{% endif %}>
                                     <span class="slider"></span>
                                 </label>
                             </div>
