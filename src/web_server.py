@@ -593,6 +593,10 @@ class _GlobalClients:
         provider = getattr(container, "kavita_client", None)
         return provider() if provider else _UNAVAILABLE_CLIENT
     @property
+    def komga_client(self):
+        provider = getattr(container, "komga_client", None)
+        return provider() if provider else _UNAVAILABLE_CLIENT
+    @property
     def cwa_client(self): return container.cwa_client()
     @property
     def storyteller_client(self): return container.storyteller_client()
@@ -1373,6 +1377,7 @@ _USER_TEST_SERVICES = {
     "Kavita": "kavita",
     "Readest": "readest",
     "Calibre-Web Automated": "cwa",
+    "Komga": "komga",
     "Hardcover": "hardcover",
     "StoryGraph": "storygraph",
 }
@@ -1390,6 +1395,7 @@ _TEST_CONNECTION_FIELDS = {
     'kavita': ['KAVITA_ENABLED', 'KAVITA_SERVER', 'KAVITA_API_KEY'],
     'bookfusion': ['BOOKFUSION_ENABLED', 'BOOKFUSION_API_URL', 'BOOKFUSION_ACCESS_TOKEN'],
     'cwa': ['CWA_ENABLED', 'CWA_SERVER', 'CWA_USERNAME', 'CWA_PASSWORD', 'CWA_SYNC_TOKEN'],
+    'komga': ['KOMGA_ENABLED', 'KOMGA_SERVER', 'KOMGA_API_KEY'],
     'readest': ['READEST_ANNOTATION_SYNC', 'READEST_EMAIL', 'READEST_PASSWORD', 'READEST_SUPABASE_URL'],
     'hardcover': ['HARDCOVER_ENABLED', 'HARDCOVER_TOKEN'],
     'storygraph': ['STORYGRAPH_ENABLED', 'STORYGRAPH_SESSION_COOKIE', 'STORYGRAPH_REMEMBER_USER_TOKEN'],
@@ -1830,6 +1836,7 @@ def _run_diagnostics_send(
         'book_orbit': _flag(lambda: container.bookorbit_client().is_configured()),
         'kavita': _flag(lambda: container.kavita_client().is_configured()),
         'cwa': _flag(lambda: container.cwa_client().is_configured()),
+        'komga': _flag(lambda: container.komga_client().is_configured()),
         'hardcover': _flag(lambda: container.hardcover_client().is_configured()),
         'storygraph': _flag(lambda: container.storygraph_client().is_configured()),
         'slash_books': os.path.isdir(os.environ.get('EBOOK_IMPORT_DIR', '/books')),
@@ -2084,10 +2091,10 @@ def find_ebook_file(filename):
 
 
 def get_kosync_id_for_ebook(ebook_filename, booklore_id=None, original_filename=None,
-                            bookorbit_id=None, kavita_id=None, source_path=None):
+                            bookorbit_id=None, kavita_id=None, komga_id=None, source_path=None):
     """Get KOSync document ID for an ebook.
     Tries Grimmory API first (if configured and booklore_id provided),
-    falls back to filesystem, then BookOrbit / ABS / CWA on-demand downloads.
+    falls back to filesystem, then BookOrbit / Komga / ABS / CWA on-demand downloads.
     """
     # Try Grimmory API first
     clients = uc()
@@ -2105,6 +2112,21 @@ def get_kosync_id_for_ebook(ebook_filename, booklore_id=None, original_filename=
                     return kosync_id
         except Exception as e:
             logger.warning("Failed to get KOSync ID from Kavita: %s", e, exc_info=True)
+
+    if komga_id and clients.komga_client.is_configured():
+        # Exact remote ID only: the hash must describe the very file this reader
+        # paired, so a title/name lookup is deliberately not attempted here.
+        try:
+            content = clients.komga_client.download_book(komga_id)
+            if content:
+                kosync_id = container.ebook_parser().get_kosync_id_from_bytes(
+                    f"komga_{komga_id}.epub", content
+                )
+                if kosync_id:
+                    logger.debug("🔍 Computed KOSync ID from Komga download: '%s'", kosync_id)
+                    return kosync_id
+        except Exception as e:
+            logger.warning("⚠️ Failed to get KOSync ID from Komga: %s", e, exc_info=True)
 
     if booklore_id and clients.booklore_client.is_configured():
         try:
@@ -2888,6 +2910,7 @@ def _upsert_storyteller_mapping(
             booklore_id,
             bookorbit_id=selected_ebook_source_id if selected_ebook_source == "BookOrbit" else None,
             kavita_id=selected_ebook_source_id if selected_ebook_source == "Kavita" else None,
+            komga_id=selected_ebook_source_id if selected_ebook_source == "Komga" else None,
         )
         if not kosync_doc_id and target_book and target_book.kosync_doc_id:
             kosync_doc_id = target_book.kosync_doc_id
@@ -3565,6 +3588,32 @@ def get_searchable_ebooks(search_term):
         except Exception as e:
             logger.warning("Kavita search failed: %s", e, exc_info=True)
 
+    # 1e. Komga — exact remote IDs. A catalog hit is only a *selection*: the
+    # bridge keeps progress bound to the ID the reader explicitly paired, never
+    # to a title, series or filename that happens to look similar.
+    komga_client = getattr(clients, "komga_client", None)
+    if komga_client and komga_client.is_configured():
+        try:
+            for kb in komga_client.search_ebooks(search_term) or []:
+                filename = kb.get('filename') or ''
+                if not is_linkable_ebook_filename(filename):
+                    continue
+                if filename.lower() in found_filenames:
+                    continue
+                found_filenames.add(filename.lower())
+                found_stems.add(Path(filename).stem.lower())
+                results.append(EbookResult(
+                    name=filename,
+                    title=kb.get('title'),
+                    subtitle=kb.get('series_title'),
+                    authors=kb.get('authors') or kb.get('author'),
+                    path=None,
+                    source='Komga',
+                    source_id=kb.get('id'),
+                ))
+        except Exception as e:
+            logger.warning("Komga search failed: %s", e, exc_info=True)
+
     # 2. ABS ebook libraries
     if search_term:
         try:
@@ -3791,6 +3840,7 @@ def _build_forge_text_item(source_type, source_id, source_path, original_filenam
         "booklore_id": normalized_source_id,
         "bookorbit_id": normalized_source_id,
         "kavita_id": normalized_source_id,
+        "komga_id": normalized_source_id,
         "bookfusion_id": normalized_source_id,
         "cwa_id": normalized_source_id,
         "abs_id": normalized_source_id,
@@ -3806,6 +3856,8 @@ def _build_forge_text_item(source_type, source_id, source_path, original_filenam
         text_item["bookorbit_id"] = normalized_source_id
     if normalized_source == "Kavita":
         text_item["kavita_id"] = normalized_source_id
+    if normalized_source == "Komga":
+        text_item["komga_id"] = normalized_source_id
     if normalized_source == "BookFusion":
         text_item["bookfusion_id"] = normalized_source_id
     if normalized_source == "CWA":
@@ -3891,6 +3943,7 @@ def _create_or_update_library_audio_mapping(
             booklore_ebook_id,
             bookorbit_id=ebook_source_id if ebook_source == "BookOrbit" else None,
             kavita_id=ebook_source_id if ebook_source == "Kavita" else None,
+            komga_id=ebook_source_id if ebook_source == "Komga" else None,
             source_path=ebook_source_path,
         )
 
@@ -4415,6 +4468,10 @@ def settings():
             'BOOKLORE_POLL_WAIT_FOR_SETTLE',
             'KAVITA_POLL_WAIT_FOR_SETTLE',
             'CWA_SYNC_POLL_WAIT_FOR_SETTLE',
+            'KOMGA_ENABLED',
+            'KOMGA_SYNC_ENABLED',
+            'KOMGA_REVERSE_SYNC_ENABLED',
+            'KOMGA_SYNC_POLL_WAIT_FOR_SETTLE',
             'STORYTELLER_LISTENING_SESSIONS',
             'STORYTELLER_NO_EPUB_CACHE',
             'BOOKLORE_SHELF_WATCH_ENABLED',
@@ -4463,6 +4520,7 @@ def settings():
             'SHELFMARK_URL', 'ABS_SERVER', 'ABS_WEB_URL', 'BOOKLORE_SERVER', 'BOOKLORE_WEB_URL',
             'BOOKORBIT_WEB_URL', 'CWA_WEB_URL', 'BOOKFUSION_API_URL',
             'KAVITA_SERVER', 'KAVITA_WEB_URL',
+            'KOMGA_SERVER',
             'STORYTELLER_API_URL', 'CWA_SERVER', 'KOSYNC_SERVER',
             'OLLAMA_URL', 'LLM_BASE_URL',
         ]
@@ -6882,6 +6940,7 @@ def match():
                 initial_booklore_id,
                 bookorbit_id=source_id if normalized_source_type == 'BookOrbit' else None,
                 kavita_id=source_id if normalized_source_type == 'Kavita' else None,
+                komga_id=source_id if normalized_source_type == 'Komga' else None,
                 source_path=source_path,
             )
 
@@ -7009,6 +7068,7 @@ def match():
                 booklore_id,
                 bookorbit_id=ebook_source_id if ebook_source == 'BookOrbit' else None,
                 kavita_id=ebook_source_id if ebook_source == 'Kavita' else None,
+                komga_id=ebook_source_id if ebook_source == 'Komga' else None,
                 source_path=source_path,
             )
 
@@ -7513,6 +7573,7 @@ def _process_batch_queue(queue_items):
                 booklore_id,
                 bookorbit_id=item.get('ebook_source_id') if _item_ebook_source == 'BookOrbit' else None,
                 kavita_id=item.get('ebook_source_id') if _item_ebook_source == 'Kavita' else None,
+                komga_id=item.get('ebook_source_id') if _item_ebook_source == 'Komga' else None,
                 source_path=item.get('ebook_source_path'),
             )
 
@@ -7791,7 +7852,7 @@ def _process_forge_match_queue(queue_items):
             resolved_path = find_ebook_file(original_filename)
             source_path = str(resolved_path) if resolved_path else ''
 
-        if source_type in ('ABS', 'Booklore', 'BookOrbit', 'Kavita', 'CWA') and not source_id:
+        if source_type in ('ABS', 'Booklore', 'BookOrbit', 'Kavita', 'Komga', 'CWA') and not source_id:
             logger.warning(
                 "Batch Forge skipped '%s': missing source id for source type '%s'",
                 sanitize_log_data(item.get('audio_title') or item.get('abs_title') or item.get('abs_id')),
@@ -7812,6 +7873,7 @@ def _process_forge_match_queue(queue_items):
             initial_booklore_id,
             bookorbit_id=source_id if text_item.get('source') == 'BookOrbit' else None,
             kavita_id=source_id if text_item.get('source') == 'Kavita' else None,
+            komga_id=source_id if text_item.get('source') == 'Komga' else None,
             source_path=source_path,
         )
         if not kosync_doc_id:
@@ -12536,6 +12598,11 @@ def _run_test_connection(service: str, payload: dict):
             _normalize_test_url(data.get('KAVITA_SERVER')),
             _coerce_test_str(data.get('KAVITA_API_KEY')),
         ),
+        'komga': lambda data: _test_komga(
+            _coerce_test_bool(data.get('KOMGA_ENABLED')),
+            _normalize_test_url(data.get('KOMGA_SERVER')),
+            _coerce_test_str(data.get('KOMGA_API_KEY')),
+        ),
         'bookfusion': lambda data: _test_bookfusion(
             _coerce_test_bool(data.get('BOOKFUSION_ENABLED')),
             _normalize_test_url(data.get('BOOKFUSION_API_URL')),
@@ -13411,6 +13478,27 @@ def _test_kavita(enabled: bool, url: str, api_key: str) -> dict:
     if response.status_code in (401, 403):
         return {"ok": False, "message": "Invalid authentication key"}
     return {"ok": False, "message": f"Kavita returned {response.status_code}"}
+
+
+def _test_komga(enabled: bool, url: str, api_key: str) -> dict:
+    """Check a Komga server/API key through the same hardened transport the
+    adapter uses: same-origin only, bounded reads, and no token in the URL or in
+    any message returned to the browser.
+
+    Deliberately exercises the catalog (`POST /api/v1/books/list`) rather than a
+    Kobo device route: testing must not create or advance a device sync point.
+    """
+    if not enabled:
+        return {"ok": False, "message": "Komga is disabled"}
+    if not url or not api_key:
+        return {"ok": False, "message": "Missing server URL or API key"}
+    from src.api.komga_client import KomgaClient
+
+    client = KomgaClient(config={"KOMGA_ENABLED": "true", "KOMGA_SERVER": url,
+                                 "KOMGA_API_KEY": api_key})
+    if client.check_connection():
+        return {"ok": True, "message": "Authenticated successfully"}
+    return {"ok": False, "message": "Komga rejected the server URL or API key"}
 
 
 def _test_cwa(enabled: bool, url: str, user: str, pwd: str, sync_token: str = "") -> dict:

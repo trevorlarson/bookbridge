@@ -37,6 +37,8 @@ PER_USER_CREDENTIAL_KEYS = frozenset({
     # Calibre-Web (Automated)
     "CWA_USERNAME", "CWA_PASSWORD", "CWA_ENABLED",
     "CWA_SYNC_TOKEN", "CWA_SYNC_ENABLED",
+    # Komga (API key identifies one reader; server stays global)
+    "KOMGA_ENABLED", "KOMGA_API_KEY", "KOMGA_SYNC_ENABLED", "KOMGA_REVERSE_SYNC_ENABLED",
     # BookOrbit (account + the user's own destination collection)
     "BOOKORBIT_USER", "BOOKORBIT_PASSWORD", "BOOKORBIT_ENABLED",
     "BOOKORBIT_SHELF_NAME",
@@ -74,6 +76,7 @@ ENGINE_MIRROR_KEYS = (
     "BOOKORBIT_USER", "BOOKORBIT_PASSWORD", "BOOKORBIT_SHELF_NAME",
     "KAVITA_API_KEY", "KAVITA_LIBRARY_ID", "KAVITA_COLLECTION_NAME",
     "CWA_USERNAME", "CWA_PASSWORD", "CWA_SYNC_TOKEN",
+    "KOMGA_API_KEY",
 )
 
 
@@ -170,6 +173,12 @@ PER_USER_FIELD_GROUPS = [
         ("CWA_SYNC_ENABLED", "Kobo sync enabled", "bool"),
         ("CWA_SYNC_TOKEN", "Kobo sync token", "secret"),
     ]),
+    ("Komga", [
+        ("KOMGA_ENABLED", "Enabled", "bool"),
+        ("KOMGA_API_KEY", "Reader API key", "secret"),
+        ("KOMGA_SYNC_ENABLED", "Kobo progress sync enabled", "bool"),
+        ("KOMGA_REVERSE_SYNC_ENABLED", "Allow writes to Komga (requires device/content verification)", "bool"),
+    ]),
     ("Hardcover", [
         ("HARDCOVER_ENABLED", "Enabled", "bool"),
         ("HARDCOVER_TOKEN", "API token", "secret"),
@@ -212,6 +221,9 @@ SERVICE_ENABLE_KEYS = frozenset({
     "KAVITA_ENABLED",
     "BOOKFUSION_ENABLED",
     "CWA_ENABLED",
+    "KOMGA_ENABLED",
+    "KOMGA_SYNC_ENABLED",
+    "KOMGA_REVERSE_SYNC_ENABLED",
     "HARDCOVER_ENABLED",
     "STORYGRAPH_ENABLED",
 })

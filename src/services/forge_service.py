@@ -48,12 +48,13 @@ HARDLINK_STAGE_MODE = "hardlink"
 VALID_STAGE_MODES = {DEFAULT_STAGE_MODE, HARDLINK_STAGE_MODE}
 
 class ForgeService:
-    def __init__(self, database_service, abs_client, booklore_client, storyteller_client, library_service, ebook_parser, transcriber, alignment_service, bookorbit_client=None, kavita_client=None, sync_clients=None):
+    def __init__(self, database_service, abs_client, booklore_client, storyteller_client, library_service, ebook_parser, transcriber, alignment_service, bookorbit_client=None, kavita_client=None, komga_client=None, sync_clients=None):
         self.database_service = database_service
         self.abs_client = abs_client
         self.booklore_client = booklore_client
         self.bookorbit_client = bookorbit_client
         self.kavita_client = kavita_client
+        self.komga_client = komga_client
         self.sync_clients = sync_clients
         self.storyteller_client = storyteller_client
         self.library_service = library_service
@@ -153,6 +154,7 @@ class ForgeService:
             "booklore": "Booklore",
             "bookorbit": "BookOrbit",
             "kavita": "Kavita",
+            "komga": "Komga",
             "abs": "ABS",
             "cwa": "CWA",
             "local file": "Local File",
@@ -181,6 +183,7 @@ class ForgeService:
             alignment_service=self.alignment_service,
             bookorbit_client=getattr(client_bundle, "bookorbit_client", self.bookorbit_client),
             kavita_client=getattr(client_bundle, "kavita_client", self.kavita_client),
+            komga_client=getattr(client_bundle, "komga_client", self.komga_client),
             sync_clients=getattr(client_bundle, "sync_clients", self.sync_clients),
         )
         worker.active_tasks = self.active_tasks
@@ -1296,6 +1299,15 @@ class ForgeService:
                     logger.info("Forge: Kavita epub downloaded")
                 else:
                     logger.error("Forge: Kavita download failed for '%s'", kavita_id or 'unknown')
+            elif source == 'Komga':
+                komga_id = text_item.get('komga_id') or text_item.get('source_id')
+                content = self.komga_client.download_book(komga_id) if self.komga_client and komga_id else None
+                if content:
+                    epub_path.write_bytes(content)
+                    text_success = True
+                    logger.info("Forge: Komga epub downloaded")
+                else:
+                    logger.error("Forge: Komga download failed for '%s'", komga_id or 'unknown')
             elif source == 'ABS':
                 abs_item_id = text_item.get('abs_id')
                 if abs_item_id:
@@ -1540,6 +1552,13 @@ class ForgeService:
                     epub_path.write_bytes(content)
                 else:
                     logger.error("Auto-Forge: Kavita download failed for '%s'", kavita_id or 'unknown')
+            elif source == 'Komga':
+                komga_id = text_item.get('komga_id') or text_item.get('source_id')
+                content = self.komga_client.download_book(komga_id) if self.komga_client and komga_id else None
+                if content:
+                    epub_path.write_bytes(content)
+                else:
+                    logger.error("Auto-Forge: Komga download failed for '%s'", komga_id or 'unknown')
             elif source == 'ABS':
                 ebook_files = self.abs_client.get_ebook_files(text_item.get('abs_id'))
                 if ebook_files: self.abs_client.download_file(ebook_files[0]['stream_url'], epub_path)
@@ -2011,6 +2030,7 @@ class ForgeService:
                     source_id_key = {
                         'BookOrbit': 'bookorbit_id',
                         'Kavita': 'kavita_id',
+                        'Komga': 'komga_id',
                         'Booklore': 'booklore_id',
                         'ABS': 'abs_id',
                         'CWA': 'cwa_id',

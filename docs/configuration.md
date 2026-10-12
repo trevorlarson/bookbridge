@@ -417,6 +417,28 @@ CWA notes:
 - With **Embed Metadata** on, CWA rewrites an EPUB's metadata on every download, so a copy a reader downloads from CWA does not hash the same as the file BookBridge matched. When `CALIBRE_LIBRARY_PATH` points at the library, BookBridge looks an unknown KOReader hash up in CWA's checksum history (`book_format_checksums`, which CWA creates and writes only while its KOReader sync is enabled) and links it to the matching book on the reader's first sync.
 - If you use the Audiobookshelf Calibre plugin, the bridge can read the `audiobookshelf_id` identifier from Calibre metadata or CWA as a fallback to avoid fuzzy matching already-linked books.
 
+#### Komga
+
+Komga is a supported ebook source and an optional reading-progress source. Keep pointing your Kobo's library sync at Komga as you do today — this integration does not replace that `api_endpoint`. BookBridge separately reads the reader's Komga position and bridges it with Audiobookshelf through its normal alignment pipeline. See `docs/komga-development.md` for the verification status of the write direction.
+
+| Setting | Env Var | Default | Notes |
+| --- | --- | --- | --- |
+| Enable | `KOMGA_ENABLED` | `false` | Opt-in. Turns on Komga catalog search, exact-ID pairing and reading-state reads. |
+| Server URL | `KOMGA_SERVER` | empty | Komga base URL. A reverse-proxy path prefix (e.g. `https://host/reader`) is preserved as-is. |
+| API Key | `KOMGA_API_KEY` | empty | Per-reader Komga API key. Used for both the REST catalog and the native Kobo routes; use a key dedicated to the bridge. |
+| Kobo Progress Sync | `KOMGA_SYNC_ENABLED` | `false` | Per-reader. Reads Komga reading state and lets it participate in sync. |
+| Write Positions Back | `KOMGA_REVERSE_SYNC_ENABLED` | `false` | Per-reader. **Off by default and still gated**: writing needs a verified exact bookmark in the KEPUB Komga serves the device, which has not yet been confirmed on a physical Kobo. With it off, BookBridge never changes Komga's reading state. |
+| Kobo Sync Poll Mode | `KOMGA_SYNC_POLL_MODE` | `global` | `global` uses the main sync cycle. `custom` polls Komga separately. |
+| Kobo Sync Poll Interval | `KOMGA_SYNC_POLL_SECONDS` | `300` | Used when Kobo Sync Poll Mode is `custom`. |
+| Wait for Position to Settle | `KOMGA_SYNC_POLL_WAIT_FOR_SETTLE` | `false` | Holds the sync back while the position is still moving between polls, and runs it once it stops. |
+
+Komga notes:
+
+- Komga appears as a standard ebook source in Add / Update Book and the match queue. Pairing stores Komga's own opaque book ID, never a title or filename guess.
+- The API key is per reader and encrypted like the other integration secrets. A reader's key is never borrowed by another account.
+- Komga's book ID is also the Kobo entitlement ID, so one key serves catalog and progress. A failed or missing key disables only that reader.
+- Komga recomputes the whole-book percentage from its own analysed positions, and its reading-state rows share one modification timestamp. BookBridge treats a returned position as authoritative and never invents a timestamp to force a write through.
+
 #### Hardcover
 
 Hardcover provides modern reading tracking with a beautiful UI. BookBridge can post reading progress to Hardcover, push selected highlights, and optionally project Grimmory shelves into Hardcover lists. It is a **write-only tracker**: it receives progress but never leads a sync.

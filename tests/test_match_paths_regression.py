@@ -223,6 +223,29 @@ class TestMatchPathsRegression(unittest.TestCase):
         self.mock_container.mock_abs_client.add_to_collection.assert_called_once_with("ab-1", "Synced with KOReader")
         self.mock_container.mock_booklore_client.add_to_shelf.assert_called_once_with("book.epub", "Kobo")
 
+    @patch("src.web_server.get_kosync_id_for_ebook", return_value="hash-komga-1")
+    def test_match_route_keeps_the_selected_komga_id(self, mock_kosync):
+        """A Komga selection is an exact remote identity, never a title guess.
+
+        The chosen ID has to reach the pairing hash and the stored mapping, so a
+        later sync cycle reads/writes the very book the reader picked.
+        """
+        response = self.client.post(
+            "/match",
+            data={
+                "audiobook_id": "ab-1",
+                "ebook_filename": "komga_BOOK1.epub",
+                "ebook_source": "Komga",
+                "ebook_source_id": "BOOK1",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(mock_kosync.call_args.kwargs.get("komga_id"), "BOOK1")
+        saved_book = self.mock_container.mock_database_service.save_book.call_args[0][0]
+        self.assertEqual(saved_book.ebook_source, "Komga")
+        self.assertEqual(saved_book.ebook_source_id, "BOOK1")
+
     @patch("src.web_server.get_kosync_id_for_ebook", return_value="hash-match-1")
     def test_match_route_adopts_existing_kosync_document(self, _mock_kosync):
         """Add Book must adopt a KoSync document that already holds the reader's progress.

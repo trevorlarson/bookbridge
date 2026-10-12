@@ -9,19 +9,24 @@ A bundle mirrors the client wiring in di_container, but scoped to one user.
 """
 
 import logging
+import os
 import threading
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from src.utils.user_config import (
     PER_USER_CREDENTIAL_KEYS,
     _ALLOW_GLOBAL_FALLBACK_KEY,
     global_fallback_allowed,
+    resolve_setting,
 )
 
 from src.api.api_clients import ABSClient, KoSyncClient
 from src.api.storyteller_api import StorytellerAPIClient
 from src.api.cwa_client import CWAClient
 from src.api.cwa_sync_api import CWASyncApi
+from src.api.komga_client import KomgaClient
+from src.api.komga_sync_api import KomgaSyncApi
 from src.api.bookorbit_client import BookOrbitClient
 from src.api.bookfusion_client import BookFusionClient
 from src.api.bookfusion_upload_client import BookFusionUploadClient
@@ -41,11 +46,53 @@ from src.sync_clients.booklore_audio_sync_client import BookLoreAudioSyncClient
 from src.sync_clients.bookorbit_sync_client import BookOrbitSyncClient
 from src.sync_clients.bookorbit_audio_sync_client import BookOrbitAudioSyncClient
 from src.sync_clients.cwa_sync_client import CWASyncClient
+from src.sync_clients.komga_sync_client import KomgaSyncClient
 from src.sync_clients.hardcover_sync_client import HardcoverSyncClient
 from src.sync_clients.storygraph_sync_client import StorygraphSyncClient
 from src.services.library_service import LibraryService
 
 logger = logging.getLogger(__name__)
+
+# Komga settings a reader-scoped client resolves. Server URL is shared; the API
+# key and the enable/sync/reverse gates are per-reader (see user_config).
+_KOMGA_DEFAULTS = {
+    "KOMGA_ENABLED": "false",
+    "KOMGA_SERVER": "",
+    "KOMGA_API_KEY": "",
+    "KOMGA_SYNC_ENABLED": "false",
+    "KOMGA_REVERSE_SYNC_ENABLED": "false",
+}
+
+
+class KomgaReaderConfig(Mapping):
+    """Live, gate-aware Komga settings for one reader bundle.
+
+    KomgaTransport reads an explicit config dict verbatim and never inherits the
+    process environment, so the registry supplies a view that resolves each key
+    through ``resolve_setting`` on every read. An already-built client therefore
+    observes a later global gate change or credential update instead of a value
+    frozen at construction, and a regular reader never inherits the primary
+    admin's API key.
+    """
+
+    def __init__(self, credentials: dict):
+        self.credentials = credentials
+
+    def __getitem__(self, key: str) -> str:
+        if key not in _KOMGA_DEFAULTS:
+            raise KeyError(key)
+        return resolve_setting(self.credentials, key, _KOMGA_DEFAULTS[key])
+
+    def __iter__(self):
+        return iter(_KOMGA_DEFAULTS)
+
+    def __len__(self) -> int:
+        return len(_KOMGA_DEFAULTS)
+
+    def get(self, key: str, default=None):
+        if key not in _KOMGA_DEFAULTS:
+            return default
+        return resolve_setting(self.credentials, key, _KOMGA_DEFAULTS[key])
 
 
 @dataclass
@@ -66,6 +113,8 @@ class UserClients:
     library_service: object = None
     sync_clients: dict = field(default_factory=dict)
     credentials: dict = field(default_factory=dict)
+    komga_client: object = None
+    komga_sync_api: object = None
 
 
 class UserClientRegistry:
@@ -136,6 +185,10 @@ class UserClientRegistry:
         storyteller_client = StorytellerAPIClient(credentials=creds)
         cwa_client = CWAClient(credentials=creds)
         cwa_sync_api = CWASyncApi(cwa_client=cwa_client, credentials=creds)
+        komga_config = KomgaReaderConfig(creds)
+        komga_client = KomgaClient(ebook_parser=ep, config=komga_config,
+                                   books_dir=self.epub_cache_dir)
+        komga_sync_api = KomgaSyncApi(config=komga_config)
         bookorbit_client = BookOrbitClient(ollama_client=self.ollama_client, credentials=creds)
         bookfusion_client = BookFusionClient(credentials=creds, database_service=db, user_id=user_id)
         bookfusion_upload_client = BookFusionUploadClient(credentials=creds, database_service=db, user_id=user_id)
@@ -157,6 +210,7 @@ class UserClientRegistry:
                 epub_cache_dir=self.epub_cache_dir,
                 bookorbit_client=bookorbit_client,
                 kavita_client=kavita_client,
+                komga_client=komga_client,
             )
 
         sync_clients = {
@@ -171,6 +225,7 @@ class UserClientRegistry:
             "BookOrbit": BookOrbitSyncClient(bookorbit_client, ep, database_service=db, user_id=user_id),
             "BookOrbitAudio": BookOrbitAudioSyncClient(bookorbit_client, ep, alignment_service=align, database_service=db, user_id=user_id),
             "CWA": CWASyncClient(cwa_sync_api, cwa_client, ep),
+            "Komga": KomgaSyncClient(komga_sync_api, komga_client, ep, user_id=user_id, database_service=db),
             "Hardcover": HardcoverSyncClient(hardcover_client, ep, abs_client, db, ollama_client=self.ollama_client, booklore_client=booklore_client, bookorbit_client=bookorbit_client, kavita_client=kavita_client),
             "StoryGraph": StorygraphSyncClient(storygraph_client, ep, abs_client, db, ollama_client=self.ollama_client, booklore_client=booklore_client, bookorbit_client=bookorbit_client, kavita_client=kavita_client),
         }
@@ -191,4 +246,6 @@ class UserClientRegistry:
             library_service=library_service,
             sync_clients=sync_clients,
             credentials=creds,
+            komga_client=komga_client,
+            komga_sync_api=komga_sync_api,
         )

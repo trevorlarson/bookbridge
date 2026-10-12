@@ -54,6 +54,7 @@ nav:
   - Getting Started: getting-started.md
   - User Guide: user-guide.md
   - Configuration: configuration.md
+  - Komga Integration Status: komga-development.md
   - Backup & Restore: backup-restore.md
   - Troubleshooting: troubleshooting.md
   - Changelog: changelog.md

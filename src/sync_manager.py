@@ -134,9 +134,10 @@ _HIGH_CONFIDENCE_NORMALIZATION_SOURCES: frozenset[str] = frozenset({
 })
 
 # Clients that navigate by locator rather than by percentage. ABSEbook rejects a
-# locator whose cfi is None outright; BookOrbit, Grimmory and CWA all back a Kobo
-# reading state, and a Kobo moves only when it is handed a KoboSpan — which those
-# services derive from the CFI we send them. Handed a bare percentage they store a
+# locator whose cfi is None outright; BookOrbit, Grimmory, CWA and Komga all back a
+# Kobo reading state, and a Kobo moves only when it is handed a KoboSpan — which
+# those services derive from the CFI we send them (Komga's client resolves it
+# against the exact KEPUB Komga serves). Handed a bare percentage they store a
 # number the device ignores, so it reopens at its own bookmark and pushes it back
 # (#364). These clients get the CFI-hydrated locator when one can be resolved.
 _CFI_DEPENDENT_CLIENTS: frozenset[str] = frozenset({
@@ -144,6 +145,7 @@ _CFI_DEPENDENT_CLIENTS: frozenset[str] = frozenset({
     "BookOrbit",
     "BookLore",
     "CWA",
+    "Komga",
 })
 
 # How BookBridge behaves when BookOrbit's own read-along sync (v3.0.0+) already
@@ -183,6 +185,7 @@ class SyncManager:
                  bookfusion_client=None,
                  bookorbit_client=None,
                  kavita_client=None,
+                 komga_client=None,
                  hardcover_client=None,
                  transcriber=None,
                  ebook_parser=None,
@@ -209,6 +212,7 @@ class SyncManager:
         self.bookfusion_client = bookfusion_client
         self.bookorbit_client = bookorbit_client
         self.kavita_client = kavita_client
+        self.komga_client = komga_client
         self.hardcover_client = hardcover_client
         self.transcriber = transcriber
         self.ebook_parser = ebook_parser
@@ -1516,6 +1520,10 @@ class SyncManager:
         return self._active_bundle_attr("kavita_client")
 
     @property
+    def active_komga_client(self):
+        return self._active_bundle_attr("komga_client")
+
+    @property
     def active_storyteller_client(self):
         return self._active_bundle_attr("storyteller_client")
 
@@ -2066,6 +2074,10 @@ class SyncManager:
             client = self.active_booklore_client
         elif normalized_source == "Kavita":
             client = self.active_kavita_client
+        elif normalized_source == "Komga":
+            # Exact remote identity: the bytes come from this reader's own Komga
+            # key. An unconfigured or missing client refuses (no title fallback).
+            client = self.active_komga_client
         else:
             return None
 

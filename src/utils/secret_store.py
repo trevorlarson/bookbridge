@@ -81,6 +81,10 @@ def secret_keys() -> frozenset:
 
 def is_secret_key(key: str) -> bool:
     """True when values for ``key`` are encrypted at rest."""
+    if key == "KOMGA_API_KEY" and not available():
+        # DatabaseService consults this before persisting either credential store.
+        # Do not inherit the legacy providers' plaintext fallback for a new secret.
+        raise RuntimeError("Komga credential storage requires available encryption")
     return key in secret_keys()
 
 

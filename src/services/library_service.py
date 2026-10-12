@@ -7,13 +7,14 @@ AudioBookShelf (ABS), Grimmory (Metadata), and our local database.
 import glob
 import logging
 import os
+from pathlib import Path
 from typing import List, Optional
 
 from src.db.models import Book
 from src.db.database_service import DatabaseService
 from src.api.api_clients import ABSClient
 from src.api.cwa_client import CWAClient
-from src.utils.cache_paths import library_roots, safe_cache_path, safe_library_path
+from src.utils.cache_paths import is_plain_basename, library_roots, safe_cache_path, safe_library_path
 from src.utils.ebook_sources import (
     is_grimmory_source,
     is_storyteller_filename,
@@ -24,7 +25,7 @@ from src.utils.ebook_sources import (
 logger = logging.getLogger(__name__)
 
 class LibraryService:
-    def __init__(self, database_service: DatabaseService, booklore_client, cwa_client: CWAClient, abs_client: ABSClient, epub_cache_dir: str, bookorbit_client=None, kavita_client=None):
+    def __init__(self, database_service: DatabaseService, booklore_client, cwa_client: CWAClient, abs_client: ABSClient, epub_cache_dir: str, bookorbit_client=None, kavita_client=None, komga_client=None):
         self.database_service = database_service
         self.booklore = booklore_client
         self.cwa_client = cwa_client
@@ -32,6 +33,7 @@ class LibraryService:
         self.epub_cache_dir = epub_cache_dir
         self.bookorbit_client = bookorbit_client
         self.kavita_client = kavita_client
+        self.komga_client = komga_client
         
         if not os.path.exists(self.epub_cache_dir):
             try:
@@ -62,6 +64,11 @@ class LibraryService:
         """
         # Priority 0 — Explicit mapping (runs before abs_item guard so a mapping
         # with no usable ABS item can still resolve its ebook from the source library)
+        if book and normalize_ebook_source(book.ebook_source) == "Komga":
+            # Komga mappings are exact identities, not title-search hints. Re-check
+            # access before returning bytes; shared cache/mounts cannot prove that
+            # this reader is permitted to download the mapped remote book.
+            return self._acquire_komga_ebook(book)
         if book and book.ebook_source and book.ebook_source_id:
             # Skip tri-linked mappings where ebook_filename names the Storyteller artifact
             # while ebook_source_id points at the source library book.
@@ -218,6 +225,43 @@ class LibraryService:
                              return output_path
                          break
 
+        return None
+
+    def _acquire_komga_ebook(self, book: Book) -> Optional[str]:
+        """Acquire an explicitly mapped Komga ebook, failing closed.
+
+        A Komga mapping is an exact remote identity, not a title hint: any denial
+        (reader not configured, rejected ID, download failure) returns None so no
+        title/provider fallback can substitute different content, and a cached or
+        mounted file never stands in for a download this reader is permitted to make.
+        """
+        client = self.komga_client
+        if client is None or not book.ebook_source_id:
+            return None
+        if is_storyteller_filename(book.ebook_filename):
+            return None
+        try:
+            if not client.is_configured():
+                return None
+            filename = client.download_ebook(book.ebook_source_id)
+        except Exception:
+            logger.warning("Explicit Komga ebook acquisition failed; refusing fallback", exc_info=True)
+            return None
+        if not filename or not is_plain_basename(filename):
+            return None
+        directory = getattr(client, "books_dir", None)
+        if directory is None:
+            return None
+        path = Path(directory) / filename
+        try:
+            # The client validates and atomically publishes the bytes, so a
+            # presence/emptiness check is enough — a size heuristic would wrongly
+            # refuse a legitimately small, valid EPUB.
+            if path.is_file() and path.stat().st_size > 0:
+                logger.info("   ✅ Priority 0 (Explicit mapping): Downloaded from Komga to %s", path)
+                return str(path)
+        except OSError:
+            logger.warning("Could not read the downloaded Komga ebook", exc_info=True)
         return None
 
     def sync_library_books(self):

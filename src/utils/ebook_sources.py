@@ -11,6 +11,7 @@ _SOURCE_NAMES = {
     "bookfusion": "BookFusion",
     "abs": "ABS",
     "cwa": "CWA",
+    "komga": "Komga",
     "local file": "Local File",
 }
 

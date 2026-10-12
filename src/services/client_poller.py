@@ -32,6 +32,7 @@ class ClientPoller:
         ('BookOrbitAudio', 'BOOKORBIT_AUDIO'),
         ('Kavita', 'KAVITA'),
         ('CWA', 'CWA_SYNC'),
+        ('Komga', 'KOMGA_SYNC'),
     ]
 
     def __init__(self, database_service, sync_manager, sync_clients_dict: dict,
@@ -225,8 +226,12 @@ class ClientPoller:
             users = [u for u in self._db.list_users() if getattr(u, 'active', 1)]
         except Exception as e:
             logger.debug(f"ClientPoller: could not list users: {e}")
+            if client_name == 'Komga':
+                return []
             users = []
         if not users:
+            if client_name == 'Komga':
+                return []
             client = self._sync_clients.get(client_name)
             return [(None, client)] if client else []
         targets = []
@@ -371,12 +376,15 @@ class ClientPoller:
         runs unscoped and records its pushes under ``None``. Without the fallback
         a per-user poll mistakes that push for an external change and bounces a
         sync straight back — an instant-sync feedback loop.
+
+        Komga keys identify separate readers: an unscoped write is never evidence
+        of an echo for a scoped Komga poll.
         """
         from src.services.write_tracker import get_recent_write
 
         window = self._self_write_window(client_name)
         recent = get_recent_write(client_name, abs_id, suppression_window=window, user_id=user_id)
-        if recent is None and user_id is not None:
+        if recent is None and user_id is not None and client_name != 'Komga':
             recent = get_recent_write(client_name, abs_id, suppression_window=window, user_id=None)
         return recent
 
@@ -397,9 +405,11 @@ class ClientPoller:
         if user_id is not None:
             try:
                 linked_ids = self._db.get_linked_abs_ids(user_id)
+                if linked_ids is None:
+                    return 0
             except Exception as e:
                 logger.debug(f"ClientPoller: could not resolve linked books for user {user_id}: {e}")
-                linked_ids = None
+                return 0
 
         checked = 0
         for book in active_books:

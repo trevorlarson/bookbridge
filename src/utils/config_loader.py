@@ -95,6 +95,11 @@ ALL_SETTINGS = [
     'CWA_SYNC_POLL_MODE', 'CWA_SYNC_POLL_SECONDS', 'CWA_SYNC_POLL_WAIT_FOR_SETTLE',
     'CALIBRE_USE_ABS_IDENTIFIER', 'CALIBRE_LIBRARY_PATH',
 
+    # Komga (shared server, reader-scoped API key and capability gates)
+    'KOMGA_ENABLED', 'KOMGA_SERVER', 'KOMGA_API_KEY', 'KOMGA_SYNC_ENABLED',
+    'KOMGA_REVERSE_SYNC_ENABLED', 'KOMGA_SYNC_POLL_MODE',
+    'KOMGA_SYNC_POLL_SECONDS', 'KOMGA_SYNC_POLL_WAIT_FOR_SETTLE',
+
     # Readest annotation sync (account is per-user; these are global engine defaults)
     'READEST_ENABLED', 'READEST_ANNOTATION_SYNC', 'READEST_ANNOTATION_SYNC_MINUTES',
     'READEST_EMAIL', 'READEST_PASSWORD',
@@ -402,6 +407,14 @@ DEFAULT_CONFIG = {
     'CWA_SYNC_POLL_WAIT_FOR_SETTLE': 'false',
     'CALIBRE_USE_ABS_IDENTIFIER': 'false',
     'CALIBRE_LIBRARY_PATH': '',
+    'KOMGA_ENABLED': 'false',
+    'KOMGA_SERVER': '',
+    'KOMGA_API_KEY': '',
+    'KOMGA_SYNC_ENABLED': 'false',
+    'KOMGA_REVERSE_SYNC_ENABLED': 'false',
+    'KOMGA_SYNC_POLL_MODE': 'global',
+    'KOMGA_SYNC_POLL_SECONDS': '300',
+    'KOMGA_SYNC_POLL_WAIT_FOR_SETTLE': 'false',
     # Readest predates its own service gate, so it defaults on: the per-user
     # highlight/upload flags are what actually start any work.
     'READEST_ENABLED': 'true',
@@ -536,7 +549,13 @@ class ConfigLoader:
                     # Honor an env override for a newly-added key (same precedence as
                     # the fresh-bootstrap path), so a compose-configured value isn't
                     # silently replaced by the default and then loaded back as empty.
-                    db_service.set_setting(key, str(os.environ.get(key, DEFAULT_CONFIG.get(key, ""))))
+                    try:
+                        db_service.set_setting(key, str(os.environ.get(key, DEFAULT_CONFIG.get(key, ""))))
+                    except Exception as e:
+                        # A key that refuses storage (e.g. a Komga secret on an install
+                        # whose credential encryption is unavailable) must not abort the
+                        # reconciliation of every other setting.
+                        logger.error(f"❌ Could not seed setting {key}: {e}")
                 if missing:
                     logger.info(f"➕ Added {len(missing)} new setting(s) to existing config: {missing}")
                 return
@@ -551,9 +570,14 @@ class ConfigLoader:
                 # Check for None explicitly
                 if val is None:
                     val = ""
-                
-                db_service.set_setting(key, str(val))
-                count += 1
+
+                try:
+                    db_service.set_setting(key, str(val))
+                    count += 1
+                except Exception as e:
+                    # Same containment as the reconciliation path above: one key that
+                    # refuses storage must not stop the rest of the bootstrap.
+                    logger.error(f"❌ Could not seed setting {key}: {e}")
             
             logger.info(f"✅ Bootstrapped {count} settings to database")
 
